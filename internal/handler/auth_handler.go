@@ -8,11 +8,11 @@ import (
 )
 
 type AuthHandler struct {
-	userService *service.UserService
+	authService service.AuthService
 }
 
-func NewAuthHandler(userService *service.UserService) *AuthHandler {
-	return &AuthHandler{userService}
+func NewAuthHandler(authService service.AuthService) *AuthHandler {
+	return &AuthHandler{authService}
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +25,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.userService.RegisterUser(req.Login, req.Password)
+	if req.Login == "" || req.Password == "" {
+		http.Error(w, "login and password are required", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.authService.RegisterUser(req.Login, req.Password)
 	if err != nil {
 		if err.Error() == "login already exists" {
 			http.Error(w, err.Error(), http.StatusConflict)
@@ -50,7 +55,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.userService.AuthenticateUser(req.Login, req.Password)
+	if req.Login == "" || req.Password == "" {
+		http.Error(w, "login and password are required", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.authService.AuthenticateUser(req.Login, req.Password)
 	if err != nil {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return

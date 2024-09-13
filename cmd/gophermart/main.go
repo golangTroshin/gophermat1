@@ -10,6 +10,7 @@ import (
 	"github.com/golangTroshin/gophermat/internal/handler"
 	"github.com/golangTroshin/gophermat/internal/repository"
 	"github.com/golangTroshin/gophermat/internal/service"
+	"gorm.io/gorm"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -29,18 +30,26 @@ func main() {
 
 	go service.StartPolling(db, 5*time.Second, 2)
 
+	if err := http.ListenAndServe(config.Options.ServerAddress, getRouter(db)); err != nil {
+		log.Fatalf("failed to start server: %v", err)
+	}
+}
+
+func getRouter(db *gorm.DB) chi.Router {
 	userRepo := repository.NewUserRepository(db)
 	balanceRepo := repository.NewUserBalanceRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	withdrawRepo := repository.NewWithdrawRepository(db)
 
-	userService := service.NewUserService(userRepo, balanceRepo, withdrawRepo)
+	balanceService := service.NewBalanceService(userRepo, balanceRepo)
+	authService := service.NewAuthService(userRepo, balanceRepo)
 	orderService := service.NewOrderService(orderRepo)
+	withdrawService := service.NewWithdrawService(withdrawRepo)
 
-	authHandler := handler.NewAuthHandler(userService)
+	authHandler := handler.NewAuthHandler(authService)
 	orderHandler := handler.NewOrderHandler(orderService)
-	balanceHandler := handler.NewBalanceHandler(userService)
-	withdrawHandler := handler.NewWithdrawHandler(userService, orderService)
+	balanceHandler := handler.NewBalanceHandler(balanceService)
+	withdrawHandler := handler.NewWithdrawHandler(balanceService, withdrawService, orderService)
 
 	r := chi.NewRouter()
 
@@ -63,5 +72,5 @@ func main() {
 		r.Get("/api/user/withdrawals", withdrawHandler.GetWithdrawals)
 	})
 
-	log.Fatal(http.ListenAndServe(config.Options.ServerAddress, r))
+	return r
 }

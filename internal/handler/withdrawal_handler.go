@@ -11,12 +11,19 @@ import (
 )
 
 type WithdrawHandler struct {
-	userService  *service.UserService
-	orderService *service.OrderService
+	balanceService  service.BalanceService
+	withdrawService service.WithdrawService
+	orderService    service.OrderService
 }
 
-func NewWithdrawHandler(userService *service.UserService, orderService *service.OrderService) *WithdrawHandler {
-	return &WithdrawHandler{userService, orderService}
+type WithdrawalResponse struct {
+	Order       string  `json:"order"`
+	Sum         float64 `json:"sum"`
+	ProcessedAt string  `json:"processed_at"`
+}
+
+func NewWithdrawHandler(balanceService service.BalanceService, withdrawService service.WithdrawService, orderService service.OrderService) *WithdrawHandler {
+	return &WithdrawHandler{balanceService, withdrawService, orderService}
 }
 
 type WithdrawRequest struct {
@@ -43,21 +50,21 @@ func (h *WithdrawHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.userService.GetUserWithBalanceBalance(userID)
+	user, err := h.balanceService.GetUserWithBalance(userID)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	if user.Balance.Current < req.Sum {
-		http.Error(w, "Insufficient funds", http.StatusPaymentRequired) // 402
+		http.Error(w, "Insufficient funds", http.StatusPaymentRequired)
 		return
 	}
 
 	user.Balance.Current -= req.Sum
 	user.Balance.Withdrawn += req.Sum
 
-	if err := h.userService.UpdateUserBalance(user); err != nil {
+	if err := h.balanceService.UpdateUserBalance(user); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -68,7 +75,7 @@ func (h *WithdrawHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		Sum:         req.Sum,
 		ProcessedAt: time.Now(),
 	}
-	if err := h.userService.RecordWithdrawal(withdrawal); err != nil {
+	if err := h.withdrawService.RecordWithdrawal(withdrawal); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -77,11 +84,6 @@ func (h *WithdrawHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WithdrawHandler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
-	type WithdrawalResponse struct {
-		Order       string  `json:"order"`
-		Sum         float64 `json:"sum"`
-		ProcessedAt string  `json:"processed_at"`
-	}
 	userID, ok := r.Context().Value(middleware.UserIDContextKey).(uint)
 
 	if !ok {
@@ -89,7 +91,7 @@ func (h *WithdrawHandler) GetWithdrawals(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	withdrawals, err := h.userService.GetUserWithdrawals(userID)
+	withdrawals, err := h.withdrawService.GetUserWithdrawals(userID)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return

@@ -5,18 +5,23 @@ import (
 	"gorm.io/gorm"
 )
 
-type UserBalanceRepository struct {
+type UserBalanceRepository interface {
+	CreateUserBalance(userBalance *model.UserBalance) error
+	UpdateUserBalance(userBalance *model.UserBalance) error
+}
+
+type userBalanceRepository struct {
 	db *gorm.DB
 }
 
-func NewUserBalanceRepository(db *gorm.DB) *UserBalanceRepository {
-	return &UserBalanceRepository{db}
+func NewUserBalanceRepository(db *gorm.DB) UserBalanceRepository {
+	return &userBalanceRepository{db}
 }
 
-func (r *UserBalanceRepository) CreateUserBalance(userBalance *model.UserBalance) error {
+func (r *userBalanceRepository) CreateUserBalance(userBalance *model.UserBalance) error {
 	return r.db.Create(userBalance).Error
 }
 
-func (r *UserBalanceRepository) UpdateUserBalance(userBalance *model.UserBalance) error {
+func (r *userBalanceRepository) UpdateUserBalance(userBalance *model.UserBalance) error {
 	return r.db.Save(userBalance).Error
 }

@@ -11,7 +11,7 @@ import (
 )
 
 type OrderHandler struct {
-	orderService *service.OrderService
+	orderService service.OrderService
 }
 
 type OrderResponse struct {
@@ -21,13 +21,12 @@ type OrderResponse struct {
 	UploadedAt string  `json:"uploaded_at"`
 }
 
-func NewOrderHandler(orderService *service.OrderService) *OrderHandler {
+func NewOrderHandler(orderService service.OrderService) *OrderHandler {
 	return &OrderHandler{orderService: orderService}
 }
 
 func (h *OrderHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value(middleware.UserIDContextKey).(uint)
-
 	if !ok {
 		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return
@@ -63,7 +62,6 @@ func (h *OrderHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
 
 func (h *OrderHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value(middleware.UserIDContextKey).(uint)
-
 	if !ok {
 		http.Error(w, "Invalid request format", http.StatusBadRequest)
 		return

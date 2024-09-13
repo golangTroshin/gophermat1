@@ -15,19 +15,25 @@ var (
 	ErrInvalidOrderNumber       = errors.New("invalid order number")
 )
 
-type OrderService struct {
-	orderRepo *repository.OrderRepository
+type OrderService interface {
+	ValidateOrderNumber(orderNumber string) bool
+	CreateOrder(userID uint, orderNumber string) error
+	GetOrdersByUserID(userID uint) ([]model.Order, error)
 }
 
-func NewOrderService(orderRepo *repository.OrderRepository) *OrderService {
-	return &OrderService{orderRepo: orderRepo}
+type orderService struct {
+	orderRepo repository.OrderRepository
 }
 
-func (s *OrderService) ValidateOrderNumber(orderNumber string) bool {
+func NewOrderService(orderRepo repository.OrderRepository) OrderService {
+	return &orderService{orderRepo: orderRepo}
+}
+
+func (s *orderService) ValidateOrderNumber(orderNumber string) bool {
 	return isValidLuhn(orderNumber)
 }
 
-func (s *OrderService) CreateOrder(userID uint, orderNumber string) error {
+func (s *orderService) CreateOrder(userID uint, orderNumber string) error {
 	existingOrder, err := s.orderRepo.FindOrderByNumber(orderNumber)
 	if err == nil {
 		if existingOrder.UserID == userID {
@@ -44,7 +50,7 @@ func (s *OrderService) CreateOrder(userID uint, orderNumber string) error {
 	return s.orderRepo.CreateOrder(newOrder)
 }
 
-func (s *OrderService) GetOrdersByUserID(userID uint) ([]model.Order, error) {
+func (s *orderService) GetOrdersByUserID(userID uint) ([]model.Order, error) {
 	return s.orderRepo.FindOrdersByUserID(userID)
 }
 

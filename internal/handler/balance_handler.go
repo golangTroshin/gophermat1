@@ -9,11 +9,11 @@ import (
 )
 
 type BalanceHandler struct {
-	userService *service.UserService
+	balanceService service.BalanceService
 }
 
-func NewBalanceHandler(userService *service.UserService) *BalanceHandler {
-	return &BalanceHandler{userService}
+func NewBalanceHandler(balanceService service.BalanceService) *BalanceHandler {
+	return &BalanceHandler{balanceService}
 }
 
 func (h *BalanceHandler) GetUserBalance(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +24,7 @@ func (h *BalanceHandler) GetUserBalance(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	balance, err := h.userService.GetUserBalance(userID)
+	balance, err := h.balanceService.GetUserBalance(userID)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
