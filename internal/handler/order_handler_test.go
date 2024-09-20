@@ -11,91 +11,82 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/mock/gomock"
 	"github.com/golangTroshin/gophermat/internal/handler"
 	"github.com/golangTroshin/gophermat/internal/middleware"
+	"github.com/golangTroshin/gophermat/internal/mock_service"
 	"github.com/golangTroshin/gophermat/internal/model"
 	"github.com/golangTroshin/gophermat/internal/service"
 )
 
-type MockOrderService struct {
-	ValidateOrderNumberFunc func(orderNumber string) bool
-	CreateOrderFunc         func(userID uint, orderNumber string) error
-	GetOrdersByUserIDFunc   func(userID uint) ([]model.Order, error)
-}
-
-func (m *MockOrderService) ValidateOrderNumber(orderNumber string) bool {
-	if m.ValidateOrderNumberFunc != nil {
-		return m.ValidateOrderNumberFunc(orderNumber)
-	}
-	return false
-}
-
-func (m *MockOrderService) CreateOrder(userID uint, orderNumber string) error {
-	if m.CreateOrderFunc != nil {
-		return m.CreateOrderFunc(userID, orderNumber)
-	}
-	return nil
-}
-
-func (m *MockOrderService) GetOrdersByUserID(userID uint) ([]model.Order, error) {
-	if m.GetOrdersByUserIDFunc != nil {
-		return m.GetOrdersByUserIDFunc(userID)
-	}
-	return nil, nil
-}
-
 func TestOrderHandler_UploadOrder(t *testing.T) {
-	mockService := &MockOrderService{}
-	orderHandler := handler.NewOrderHandler(mockService)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockOrderService := mock_service.NewMockOrderService(ctrl)
+	orderHandler := handler.NewOrderHandler(mockOrderService)
 
 	tests := map[string]struct {
-		body                string
-		userID              uint
-		validateOrderNumber func(orderNumber string) bool
-		createOrder         func(userID uint, orderNumber string) error
-		expectedStatus      int
+		body              string
+		userID            uint
+		mockValidateOrder func(m *mock_service.MockOrderService)
+		mockCreateOrder   func(m *mock_service.MockOrderService)
+		expectedStatus    int
 	}{
-		"Valid Order Upload": {
+		"Valid_Order_Upload": {
 			body:   "123456789",
 			userID: 1,
-			validateOrderNumber: func(orderNumber string) bool {
-				return true
+			mockValidateOrder: func(m *mock_service.MockOrderService) {
+				m.EXPECT().ValidateOrderNumber("123456789").Return(true)
 			},
-			createOrder: func(userID uint, orderNumber string) error {
-				return nil
+			mockCreateOrder: func(m *mock_service.MockOrderService) {
+				m.EXPECT().CreateOrder(uint(1), "123456789").Return(nil)
 			},
 			expectedStatus: http.StatusAccepted,
 		},
-		"Invalid Order Number": {
+		"Invalid_Order_Number": {
 			body:   "invalidorder",
 			userID: 1,
-			validateOrderNumber: func(orderNumber string) bool {
-				return false
-			},
-			createOrder: func(userID uint, orderNumber string) error {
-				return nil
+			mockValidateOrder: func(m *mock_service.MockOrderService) {
+				m.EXPECT().ValidateOrderNumber("invalidorder").Return(false)
 			},
 			expectedStatus: http.StatusUnprocessableEntity,
 		},
-		"Order Exists Same User": {
+		"Empty_Body": {
+			body:           "",
+			userID:         1,
+			expectedStatus: http.StatusBadRequest,
+		},
+		"Order_Exists_Same_User": {
 			body:   "123456789",
 			userID: 1,
-			validateOrderNumber: func(orderNumber string) bool {
-				return true
+			mockValidateOrder: func(m *mock_service.MockOrderService) {
+				m.EXPECT().ValidateOrderNumber("123456789").Return(true)
 			},
-			createOrder: func(userID uint, orderNumber string) error {
-				return service.ErrOrderExistsSameUser
+			mockCreateOrder: func(m *mock_service.MockOrderService) {
+				m.EXPECT().CreateOrder(uint(1), "123456789").Return(service.ErrOrderExistsSameUser)
 			},
 			expectedStatus: http.StatusOK,
 		},
-		"Internal Server Error": {
+		"Order_Exists_Different_User": {
 			body:   "123456789",
 			userID: 1,
-			validateOrderNumber: func(orderNumber string) bool {
-				return true
+			mockValidateOrder: func(m *mock_service.MockOrderService) {
+				m.EXPECT().ValidateOrderNumber("123456789").Return(true)
 			},
-			createOrder: func(userID uint, orderNumber string) error {
-				return errors.New("some internal error")
+			mockCreateOrder: func(m *mock_service.MockOrderService) {
+				m.EXPECT().CreateOrder(uint(1), "123456789").Return(service.ErrOrderExistsDifferentUser)
+			},
+			expectedStatus: http.StatusConflict,
+		},
+		"Internal_Server_Error": {
+			body:   "123456789",
+			userID: 1,
+			mockValidateOrder: func(m *mock_service.MockOrderService) {
+				m.EXPECT().ValidateOrderNumber("123456789").Return(true)
+			},
+			mockCreateOrder: func(m *mock_service.MockOrderService) {
+				m.EXPECT().CreateOrder(uint(1), "123456789").Return(errors.New("some internal error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 		},
@@ -103,8 +94,13 @@ func TestOrderHandler_UploadOrder(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockService.ValidateOrderNumberFunc = tc.validateOrderNumber
-			mockService.CreateOrderFunc = tc.createOrder
+			if tc.mockValidateOrder != nil {
+				tc.mockValidateOrder(mockOrderService)
+			}
+
+			if tc.mockCreateOrder != nil {
+				tc.mockCreateOrder(mockOrderService)
+			}
 
 			req := httptest.NewRequest("POST", "/api/user/orders", nil)
 			ctx := context.WithValue(req.Context(), middleware.UserIDContextKey, tc.userID)
@@ -122,26 +118,29 @@ func TestOrderHandler_UploadOrder(t *testing.T) {
 }
 
 func TestOrderHandler_GetOrders(t *testing.T) {
-	mockService := &MockOrderService{}
-	orderHandler := handler.NewOrderHandler(mockService)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockOrderService := mock_service.NewMockOrderService(ctrl)
+	orderHandler := handler.NewOrderHandler(mockOrderService)
 
 	tests := map[string]struct {
-		userID           uint
-		getOrdersByUser  func(userID uint) ([]model.Order, error)
-		expectedStatus   int
-		expectedResponse []handler.OrderResponse
+		userID              uint
+		mockGetOrdersByUser func(m *mock_service.MockOrderService)
+		expectedStatus      int
+		expectedResponse    []handler.OrderResponse
 	}{
-		"Valid Orders Retrieval": {
+		"Valid_Orders_Retrieval": {
 			userID: 1,
-			getOrdersByUser: func(userID uint) ([]model.Order, error) {
-				return []model.Order{
+			mockGetOrdersByUser: func(m *mock_service.MockOrderService) {
+				m.EXPECT().GetOrdersByUserID(uint(1)).Return([]model.Order{
 					{
 						Number:     "123456789",
 						Status:     "PROCESSED",
 						Accrual:    100.0,
 						UploadedAt: time.Now(),
 					},
-				}, nil
+				}, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedResponse: []handler.OrderResponse{
@@ -153,18 +152,18 @@ func TestOrderHandler_GetOrders(t *testing.T) {
 				},
 			},
 		},
-		"No Orders Found": {
+		"No_Orders_Found": {
 			userID: 1,
-			getOrdersByUser: func(userID uint) ([]model.Order, error) {
-				return []model.Order{}, nil
+			mockGetOrdersByUser: func(m *mock_service.MockOrderService) {
+				m.EXPECT().GetOrdersByUserID(uint(1)).Return([]model.Order{}, nil)
 			},
 			expectedStatus:   http.StatusNoContent,
-			expectedResponse: []handler.OrderResponse{},
+			expectedResponse: nil,
 		},
-		"Internal Server Error": {
+		"Internal_Server_Error": {
 			userID: 1,
-			getOrdersByUser: func(userID uint) ([]model.Order, error) {
-				return nil, errors.New("some internal error")
+			mockGetOrdersByUser: func(m *mock_service.MockOrderService) {
+				m.EXPECT().GetOrdersByUserID(uint(1)).Return(nil, errors.New("some internal error"))
 			},
 			expectedStatus:   http.StatusInternalServerError,
 			expectedResponse: nil,
@@ -173,7 +172,9 @@ func TestOrderHandler_GetOrders(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockService.GetOrdersByUserIDFunc = tc.getOrdersByUser
+			if tc.mockGetOrdersByUser != nil {
+				tc.mockGetOrdersByUser(mockOrderService)
+			}
 
 			req := httptest.NewRequest("GET", "/api/user/orders", nil)
 			ctx := context.WithValue(req.Context(), middleware.UserIDContextKey, tc.userID)

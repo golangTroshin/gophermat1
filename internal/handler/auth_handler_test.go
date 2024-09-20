@@ -7,83 +7,66 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/golang/mock/gomock"
 	"github.com/golangTroshin/gophermat/internal/handler"
+	"github.com/golangTroshin/gophermat/internal/mock_service"
 	"github.com/golangTroshin/gophermat/internal/model"
+	"github.com/golangTroshin/gophermat/internal/service"
 )
 
-type MockAuthService struct {
-	RegisterUserFunc     func(login, password string) (*model.User, error)
-	AuthenticateUserFunc func(login, password string) (*model.User, error)
-}
-
-func (m *MockAuthService) RegisterUser(login, password string) (*model.User, error) {
-	if m.RegisterUserFunc != nil {
-		return m.RegisterUserFunc(login, password)
-	}
-	return nil, nil
-}
-
-func (m *MockAuthService) AuthenticateUser(login, password string) (*model.User, error) {
-	if m.AuthenticateUserFunc != nil {
-		return m.AuthenticateUserFunc(login, password)
-	}
-	return nil, nil
-}
-
-func MockSetAuthCookie(userID uint, w http.ResponseWriter) {
-	w.Header().Set("Set-Cookie", "auth_token=mocked_token; HttpOnly")
-}
-
 func TestAuthHandler_Register(t *testing.T) {
-	mockService := &MockAuthService{}
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAuthService := mock_service.NewMockAuthService(ctrl)
+	authHandler := handler.NewAuthHandler(mockAuthService)
 
 	tests := map[string]struct {
-		requestBody      string
-		mockRegisterFunc func(login, password string) (*model.User, error)
-		expectedStatus   int
-		expectedCookie   bool
+		requestBody     string
+		mockRegister    func(m *mock_service.MockAuthService)
+		expectedStatus  int
+		expectedMessage string
 	}{
-		"Valid Registration": {
+		"Valid_Registration": {
 			requestBody: `{"login":"valid_user", "password":"valid_password"}`,
-			mockRegisterFunc: func(login, password string) (*model.User, error) {
-				return &model.User{ID: 1}, nil
+			mockRegister: func(m *mock_service.MockAuthService) {
+				m.EXPECT().RegisterUser("valid_user", "valid_password").Return(&model.User{ID: 1}, nil)
 			},
-			expectedStatus: http.StatusOK,
-			expectedCookie: true,
+			expectedStatus:  http.StatusOK,
+			expectedMessage: "",
 		},
-		"Login Already Exists": {
+		"Missing_Login_Or_Password": {
+			requestBody:     `{"login":"", "password":"password"}`,
+			mockRegister:    nil,
+			expectedStatus:  http.StatusBadRequest,
+			expectedMessage: "login and password are required",
+		},
+		"User_Already_Exists": {
 			requestBody: `{"login":"existing_user", "password":"password"}`,
-			mockRegisterFunc: func(login, password string) (*model.User, error) {
-				return nil, errors.New("login already exists")
+			mockRegister: func(m *mock_service.MockAuthService) {
+				m.EXPECT().RegisterUser("existing_user", "password").Return(nil, service.ErrUserExists)
 			},
-			expectedStatus: http.StatusConflict,
-			expectedCookie: false,
+			expectedStatus:  http.StatusConflict,
+			expectedMessage: "user already exists",
 		},
-		"Invalid Request Body": {
-			requestBody:    `{"login":"missing_password"}`,
-			expectedStatus: http.StatusBadRequest,
-			expectedCookie: false,
-		},
-		"Server Error": {
-			requestBody: `{"login":"valid_user", "password":"password"}`,
-			mockRegisterFunc: func(login, password string) (*model.User, error) {
-				return nil, errors.New("some internal error")
+		"Internal_Server_Error": {
+			requestBody: `{"login":"valid_user", "password":"valid_password"}`,
+			mockRegister: func(m *mock_service.MockAuthService) {
+				m.EXPECT().RegisterUser("valid_user", "valid_password").Return(nil, errors.New("internal error"))
 			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedCookie: false,
+			expectedStatus:  http.StatusInternalServerError,
+			expectedMessage: "server error",
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			if tc.mockRegisterFunc != nil {
-				mockService.RegisterUserFunc = tc.mockRegisterFunc
+			if tc.mockRegister != nil {
+				tc.mockRegister(mockAuthService)
 			}
 
-			req := httptest.NewRequest("POST", "/api/user/register", bytes.NewBufferString(tc.requestBody))
+			req := httptest.NewRequest("POST", "/register", bytes.NewBufferString(tc.requestBody))
 			rr := httptest.NewRecorder()
-
-			authHandler := handler.NewAuthHandler(mockService)
 
 			authHandler.Register(rr, req)
 
@@ -91,72 +74,79 @@ func TestAuthHandler_Register(t *testing.T) {
 				t.Errorf("expected status %d, got %d", tc.expectedStatus, rr.Code)
 			}
 
-			cookie := rr.Header().Get("Set-Cookie")
-			if tc.expectedCookie && cookie == "" {
-				t.Errorf("expected Set-Cookie header, but none was set")
-			}
-			if !tc.expectedCookie && cookie != "" {
-				t.Errorf("did not expect Set-Cookie header, but it was set")
+			if tc.expectedMessage != "" {
+				if rr.Body.String() != tc.expectedMessage+"\n" {
+					t.Errorf("expected message %q, got %q", tc.expectedMessage, rr.Body.String())
+				}
 			}
 		})
 	}
 }
 
 func TestAuthHandler_Login(t *testing.T) {
-	mockService := &MockAuthService{}
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAuthService := mock_service.NewMockAuthService(ctrl)
+	authHandler := handler.NewAuthHandler(mockAuthService)
 
 	tests := map[string]struct {
-		requestBody    string
-		mockLoginFunc  func(login, password string) (*model.User, error)
-		expectedStatus int
-		expectedCookie bool
+		requestBody     string
+		mockLogin       func(m *mock_service.MockAuthService)
+		expectedStatus  int
+		expectedMessage string
 	}{
-		"Valid Login": {
+		"Valid_Login": {
 			requestBody: `{"login":"valid_user", "password":"valid_password"}`,
-			mockLoginFunc: func(login, password string) (*model.User, error) {
-				return &model.User{ID: 1}, nil
+			mockLogin: func(m *mock_service.MockAuthService) {
+				m.EXPECT().AuthenticateUser("valid_user", "valid_password").Return(&model.User{ID: 1}, nil)
 			},
-			expectedStatus: http.StatusOK,
-			expectedCookie: true,
+			expectedStatus:  http.StatusOK,
+			expectedMessage: "",
 		},
-		"Invalid Credentials": {
+		"Missing_Login_Or_Password": {
+			requestBody:     `{"login":"", "password":"password"}`,
+			mockLogin:       nil,
+			expectedStatus:  http.StatusBadRequest,
+			expectedMessage: "login and password are required",
+		},
+		"Invalid_Credentials": {
 			requestBody: `{"login":"invalid_user", "password":"wrong_password"}`,
-			mockLoginFunc: func(login, password string) (*model.User, error) {
-				return nil, errors.New("invalid credentials")
+			mockLogin: func(m *mock_service.MockAuthService) {
+				m.EXPECT().AuthenticateUser("invalid_user", "wrong_password").Return(nil, service.ErrInvalidCreds)
 			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedCookie: false,
+			expectedStatus:  http.StatusUnauthorized,
+			expectedMessage: "invalid credentials",
 		},
-		"Invalid Request Body": {
-			requestBody:    `{"login":"missing_password"}`,
-			mockLoginFunc:  nil,
-			expectedStatus: http.StatusBadRequest,
-			expectedCookie: false,
+		"Internal_Server_Error": {
+			requestBody: `{"login":"valid_user", "password":"valid_password"}`,
+			mockLogin: func(m *mock_service.MockAuthService) {
+				m.EXPECT().AuthenticateUser("valid_user", "valid_password").Return(nil, errors.New("internal error"))
+			},
+			expectedStatus:  http.StatusInternalServerError,
+			expectedMessage: "server error",
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			if tc.mockLoginFunc != nil {
-				mockService.AuthenticateUserFunc = tc.mockLoginFunc
+			if tc.mockLogin != nil {
+				tc.mockLogin(mockAuthService)
 			}
 
-			req := httptest.NewRequest("POST", "/api/user/login", bytes.NewBufferString(tc.requestBody))
+			req := httptest.NewRequest("POST", "/login", bytes.NewBufferString(tc.requestBody))
 			rr := httptest.NewRecorder()
 
-			authHandler := handler.NewAuthHandler(mockService)
 			authHandler.Login(rr, req)
 
 			if rr.Code != tc.expectedStatus {
 				t.Errorf("expected status %d, got %d", tc.expectedStatus, rr.Code)
 			}
 
-			cookie := rr.Header().Get("Set-Cookie")
-			if tc.expectedCookie && cookie == "" {
-				t.Errorf("expected Set-Cookie header, but none was set")
-			}
-			if !tc.expectedCookie && cookie != "" {
-				t.Errorf("did not expect Set-Cookie header, but it was set")
+			if tc.expectedMessage != "" {
+				if rr.Body.String() != tc.expectedMessage+"\n" {
+					t.Errorf("expected message %q, got %q", tc.expectedMessage, rr.Body.String())
+				}
 			}
 		})
 	}

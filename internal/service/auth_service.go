@@ -27,6 +27,12 @@ type Claims struct {
 	UserID uint
 }
 
+var (
+	ErrUserExists   = errors.New("user already exists")
+	ErrInvalidCreds = errors.New("invalid credentials")
+	ErrUserNotFount = errors.New("user not found")
+)
+
 const tokenExp = time.Hour * 3
 const SecretKey = "supersecretkey"
 const CookieAuthToken = "auth_token"
@@ -38,7 +44,7 @@ func NewAuthService(userRepo repository.UserRepository, balanceRepo repository.U
 func (s *authService) RegisterUser(login, password string) (*model.User, error) {
 	_, err := s.userRepo.GetUserByLogin(login)
 	if err == nil {
-		return &model.User{}, errors.New("login already exists")
+		return &model.User{}, ErrUserExists
 	}
 
 	hashedPassword, err := utils.HashPassword(password)
@@ -62,11 +68,11 @@ func (s *authService) RegisterUser(login, password string) (*model.User, error) 
 func (s *authService) AuthenticateUser(login, password string) (*model.User, error) {
 	user, err := s.userRepo.GetUserByLogin(login)
 	if err != nil {
-		return user, errors.New("user not found")
+		return user, ErrUserNotFount
 	}
 
 	if !utils.CheckPasswordHash(password, user.Password) {
-		return user, errors.New("invalid password")
+		return user, ErrInvalidCreds
 	}
 
 	return user, nil

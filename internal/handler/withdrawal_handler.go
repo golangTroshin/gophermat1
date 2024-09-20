@@ -17,7 +17,7 @@ type WithdrawHandler struct {
 }
 
 type WithdrawalResponse struct {
-	Order       string  `json:"order"`
+	OrderNumber string  `json:"order"`
 	Sum         float64 `json:"sum"`
 	ProcessedAt string  `json:"processed_at"`
 }
@@ -41,7 +41,7 @@ func (h *WithdrawHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 
 	var req WithdrawRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusUnprocessableEntity)
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
@@ -71,9 +71,9 @@ func (h *WithdrawHandler) Withdraw(w http.ResponseWriter, r *http.Request) {
 
 	withdrawal := &model.UserWithdrawal{
 		UserID:      user.ID,
-		Order:       req.Order,
+		OrderNumber: req.Order,
 		Sum:         req.Sum,
-		ProcessedAt: time.Now(),
+		ProcessedAt: time.Now().Format(time.RFC3339),
 	}
 	if err := h.withdrawService.RecordWithdrawal(withdrawal); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -105,9 +105,9 @@ func (h *WithdrawHandler) GetWithdrawals(w http.ResponseWriter, r *http.Request)
 	var response []WithdrawalResponse
 	for _, withdrawal := range withdrawals {
 		response = append(response, WithdrawalResponse{
-			Order:       withdrawal.Order,
+			OrderNumber: withdrawal.OrderNumber,
 			Sum:         withdrawal.Sum,
-			ProcessedAt: withdrawal.ProcessedAt.Format(time.RFC3339), // Форматирование времени
+			ProcessedAt: withdrawal.ProcessedAt,
 		})
 	}
 

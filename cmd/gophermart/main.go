@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/golangTroshin/gophermat/internal/config"
@@ -28,11 +32,34 @@ func main() {
 		log.Fatal(err)
 	}
 
-	go service.StartPolling(db, 5*time.Second, 2)
+	go service.StartPolling(db, time.Duration(config.Options.AccrualSystemInterval)*time.Second, config.Options.AccrualSystemWorkers)
 
-	if err := http.ListenAndServe(config.Options.ServerAddress, getRouter(db)); err != nil {
-		log.Fatalf("failed to start server: %v", err)
+	server := &http.Server{
+		Addr:    config.Options.ServerAddress,
+		Handler: getRouter(db),
 	}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("Starting server on %s", config.Options.ServerAddress)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %v", err)
+		}
+	}()
+
+	<-quit
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server exiting gracefully.")
 }
 
 func getRouter(db *gorm.DB) chi.Router {
@@ -62,14 +89,14 @@ func getRouter(db *gorm.DB) chi.Router {
 	r.Post("/api/user/register", authHandler.Register)
 	r.Post("/api/user/login", authHandler.Login)
 
-	r.Group(func(r chi.Router) {
+	r.Route("/api/user", func(r chi.Router) {
 		r.Use(internal_middleware.AuthMiddleware)
 
-		r.Post("/api/user/orders", orderHandler.UploadOrder)
-		r.Get("/api/user/orders", orderHandler.GetOrders)
-		r.Get("/api/user/balance", balanceHandler.GetUserBalance)
-		r.Post("/api/user/balance/withdraw", withdrawHandler.Withdraw)
-		r.Get("/api/user/withdrawals", withdrawHandler.GetWithdrawals)
+		r.Post("/orders", orderHandler.UploadOrder)
+		r.Get("/orders", orderHandler.GetOrders)
+		r.Get("/balance", balanceHandler.GetUserBalance)
+		r.Post("/balance/withdraw", withdrawHandler.Withdraw)
+		r.Get("/withdrawals", withdrawHandler.GetWithdrawals)
 	})
 
 	return r

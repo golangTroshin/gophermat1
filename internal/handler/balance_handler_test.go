@@ -8,37 +8,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/golang/mock/gomock"
 	"github.com/golangTroshin/gophermat/internal/handler"
 	"github.com/golangTroshin/gophermat/internal/middleware"
+	"github.com/golangTroshin/gophermat/internal/mock_service"
 	"github.com/golangTroshin/gophermat/internal/model"
 )
-
-type MockBalanceService struct {
-	GetUserBalanceFunc     func(userID uint) (*model.UserBalance, error)
-	GetUserWithBalanceFunc func(userID uint) (*model.User, error)
-	UpdateUserBalanceFunc  func(user *model.User) error
-}
-
-func (m *MockBalanceService) GetUserBalance(userID uint) (*model.UserBalance, error) {
-	if m.GetUserBalanceFunc != nil {
-		return m.GetUserBalanceFunc(userID)
-	}
-	return nil, nil
-}
-
-func (m *MockBalanceService) GetUserWithBalance(userID uint) (*model.User, error) {
-	if m.GetUserWithBalanceFunc != nil {
-		return m.GetUserWithBalanceFunc(userID)
-	}
-	return nil, nil
-}
-
-func (m *MockBalanceService) UpdateUserBalance(user *model.User) error {
-	if m.UpdateUserBalanceFunc != nil {
-		return m.UpdateUserBalanceFunc(user)
-	}
-	return nil
-}
 
 func mockUserIDContext(userID uint) context.Context {
 	ctx := context.Background()
@@ -46,22 +21,25 @@ func mockUserIDContext(userID uint) context.Context {
 }
 
 func TestBalanceHandler_GetUserBalance(t *testing.T) {
-	mockService := &MockBalanceService{}
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockService := mock_service.NewMockBalanceService(ctrl)
 	balanceHandler := handler.NewBalanceHandler(mockService)
 
 	tests := map[string]struct {
 		userID           uint
-		mockBalanceFunc  func(userID uint) (*model.UserBalance, error)
+		mockBalanceFunc  func(*mock_service.MockBalanceService)
 		expectedStatus   int
 		expectedResponse map[string]interface{}
 	}{
-		"Valid Balance": {
+		"Valid_Balance": {
 			userID: 1,
-			mockBalanceFunc: func(userID uint) (*model.UserBalance, error) {
-				return &model.UserBalance{
+			mockBalanceFunc: func(m *mock_service.MockBalanceService) {
+				m.EXPECT().GetUserBalance(uint(1)).Return(&model.UserBalance{
 					Current:   100.0,
 					Withdrawn: 50.0,
-				}, nil
+				}, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedResponse: map[string]interface{}{
@@ -69,10 +47,10 @@ func TestBalanceHandler_GetUserBalance(t *testing.T) {
 				"withdrawn": 50.0,
 			},
 		},
-		"Internal Server Error": {
+		"Internal_Server_Error": {
 			userID: 1,
-			mockBalanceFunc: func(userID uint) (*model.UserBalance, error) {
-				return nil, errors.New("some internal error")
+			mockBalanceFunc: func(m *mock_service.MockBalanceService) {
+				m.EXPECT().GetUserBalance(uint(1)).Return(nil, errors.New("some internal error"))
 			},
 			expectedStatus:   http.StatusInternalServerError,
 			expectedResponse: nil,
@@ -81,7 +59,9 @@ func TestBalanceHandler_GetUserBalance(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			mockService.GetUserBalanceFunc = tc.mockBalanceFunc
+			if tc.mockBalanceFunc != nil {
+				tc.mockBalanceFunc(mockService)
+			}
 
 			req := httptest.NewRequest("GET", "/balance", nil)
 			req = req.WithContext(mockUserIDContext(tc.userID))

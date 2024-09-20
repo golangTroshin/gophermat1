@@ -22,10 +22,10 @@ type APIResponse struct {
 
 var (
 	pause    bool
-	pauseMux sync.Mutex
+	pauseMux sync.RWMutex
 )
 
-func fetchOrderStatus(orderNumber string) (*APIResponse, error) {
+func FetchOrderStatus(orderNumber string) (*APIResponse, error) {
 	url := fmt.Sprintf("%s/api/orders/%s", config.Options.AccrualSystemAddress, orderNumber)
 
 	resp, err := http.Get(url)
@@ -45,15 +45,13 @@ func fetchOrderStatus(orderNumber string) (*APIResponse, error) {
 			}
 
 			pauseMux.Lock()
+			defer pauseMux.Unlock()
+
 			pause = true
-			pauseMux.Unlock()
 
 			log.Printf("Too many requests, pausing for %d seconds", retryAfterSeconds)
 			time.Sleep(time.Duration(retryAfterSeconds) * time.Second)
-
-			pauseMux.Lock()
 			pause = false
-			pauseMux.Unlock()
 
 			return nil, fmt.Errorf("retry after pause due to 429")
 		}
@@ -71,7 +69,7 @@ func fetchOrderStatus(orderNumber string) (*APIResponse, error) {
 	return &apiResponse, nil
 }
 
-func updateOrderStatus(db *gorm.DB, order *model.Order, apiResponse *APIResponse) error {
+func UpdateOrderStatus(db *gorm.DB, order *model.Order, apiResponse *APIResponse) error {
 	newStatus := apiResponse.Status
 	if apiResponse.Status == "REGISTERED" {
 		newStatus = "PROCESSING"
@@ -96,14 +94,14 @@ func updateOrderStatus(db *gorm.DB, order *model.Order, apiResponse *APIResponse
 	return db.Save(order).Error
 }
 
-func processOrders(db *gorm.DB) {
+func ProcessOrders(db *gorm.DB) {
 	var orders []model.Order
 	db.Where("status IN ?", []string{"NEW", "PROCESSING"}).Find(&orders)
 
 	for _, order := range orders {
-		pauseMux.Lock()
+		pauseMux.RLock()
 		paused := pause
-		pauseMux.Unlock()
+		pauseMux.RUnlock()
 
 		if paused {
 			log.Println("Waiting for pause to be lifted...")
@@ -111,17 +109,17 @@ func processOrders(db *gorm.DB) {
 				time.Sleep(1 * time.Second)
 				pauseMux.Lock()
 				paused = pause
-				pauseMux.Unlock()
+				pauseMux.RUnlock()
 			}
 		}
 
-		apiResponse, err := fetchOrderStatus(order.Number)
+		apiResponse, err := FetchOrderStatus(order.Number)
 		if err != nil {
 			log.Printf("Error fetching order %s: %v", order.Number, err)
 			continue
 		}
 
-		err = updateOrderStatus(db, &order, apiResponse)
+		err = UpdateOrderStatus(db, &order, apiResponse)
 		if err != nil {
 			log.Printf("Error updating order %s: %v", order.Number, err)
 			continue
@@ -142,7 +140,7 @@ func StartPolling(db *gorm.DB, interval time.Duration, numWorkers int) {
 			defer ticker.Stop()
 
 			for range ticker.C {
-				processOrders(db)
+				ProcessOrders(db)
 			}
 		}()
 	}

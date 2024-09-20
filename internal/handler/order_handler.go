@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -46,10 +47,10 @@ func (h *OrderHandler) UploadOrder(w http.ResponseWriter, r *http.Request) {
 
 	err = h.orderService.CreateOrder(userID, orderNumber)
 	if err != nil {
-		if err == service.ErrOrderExistsSameUser {
+		if errors.Is(err, service.ErrOrderExistsSameUser) {
 			w.WriteHeader(http.StatusOK)
 			return
-		} else if err == service.ErrOrderExistsDifferentUser {
+		} else if errors.Is(err, service.ErrOrderExistsDifferentUser) {
 			http.Error(w, "Order already uploaded by another user", http.StatusConflict)
 			return
 		}
@@ -89,5 +90,6 @@ func (h *OrderHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }
